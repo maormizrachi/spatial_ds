@@ -6,7 +6,7 @@
 #endif // USE_VCL_VECTORIZATION
 
 #ifdef RICH_MPI
-    #include <mpi/serialize/Serializer.hpp>
+    #include <mpi_utils/serialize/Serializer.hpp>
 #endif // RICH_MPI
 
 #include <iostream>

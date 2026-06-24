@@ -4,7 +4,7 @@
 #include <boost/container/small_vector.hpp>
 
 #ifdef RICH_MPI
-    #include <mpi/serialize/Serializer.hpp>
+    #include <mpi_utils/serialize/Serializer.hpp>
 #endif // RICH_MPI
 
 #define UNDEFINED_OWNER -1
