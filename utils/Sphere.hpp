@@ -5,9 +5,7 @@
     #include <vectorclass.h>
 #endif // USE_VCL_VECTORIZATION
 
-#ifdef RICH_MPI
     #include <mpi_utils/serialize/Serializer.hpp>
-#endif // RICH_MPI
 
 #include <iostream>
 
@@ -17,9 +15,7 @@
 
 template<typename T>
 class Sphere
-            #ifdef RICH_MPI
                 : public Serializable
-            #endif // RICH_MPI
 {
 public:
     T center;
@@ -43,7 +39,6 @@ public:
         return stream << "Sphere(" << sphere.center << ", " << sphere.radius << ")";
     }
 
-    #ifdef RICH_MPI
         force_inline size_t load(const Serializer *serializer, std::size_t byteOffset) override
         {
             size_t bytes = 0;
@@ -59,7 +54,6 @@ public:
             bytes += serializer->insert(this->radius);
             return bytes;
         }
-    #endif // RICH_MPI
 };
 
 template<typename T>

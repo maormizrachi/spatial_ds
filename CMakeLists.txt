@@ -9,4 +9,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # so that #include <spatial_ds/...> resolves correctly.
 #
 # External dependencies (consumer must provide include paths):
-#   - mpi_utils (cpp-MPI-utils)  -- only under RICH_MPI
+#   - mpi_utils (cpp-MPI-utils)  -- required by MPI-dependent headers

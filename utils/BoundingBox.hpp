@@ -6,18 +6,14 @@
     #include <vectorclass.h>
 #endif // USE_VCL_VECTORIZATION
 
-#ifdef RICH_MPI
     #include <mpi_utils/serialize/Serializer.hpp>
-#endif // RICH_MPI
 
 #define DIM 3
 #define TOLERANCE 1e-12
 
 template<typename T>
 class BoundingBox
-                #ifdef RICH_MPI
                     : public Serializable
-                #endif // RICH_MPI
 {
 template<typename U>
 friend class BoundingBox;
@@ -212,26 +208,24 @@ public:
         return stream << "BoundingBox(" << box.ll << ", " << box.ur << ")";
     }
 
-    #ifdef RICH_MPI
 
     force_inline size_t dump(Serializer *serializer) const override
     {
         size_t bytes = 0;
-        bytes += this->ll.dump(serializer);
-        bytes += this->ur.dump(serializer);
+        bytes += serializer->insert(this->ll);
+        bytes += serializer->insert(this->ur);
         return bytes;
     }
     
     force_inline size_t load(const Serializer *serializer, size_t byteOffset) override
     {
         size_t bytesRead = 0;
-        bytesRead += this->ll.load(serializer, byteOffset);
-        bytesRead += this->ur.load(serializer, byteOffset + bytesRead);
+        bytesRead += serializer->extract(this->ll, byteOffset);
+        bytesRead += serializer->extract(this->ur, byteOffset + bytesRead);
         this->recalculateFields();
         return bytesRead;
     }
 
-    #endif // RICH_MPI
 
     template<typename U>
     inline bool operator==(const BoundingBox<U> &other)

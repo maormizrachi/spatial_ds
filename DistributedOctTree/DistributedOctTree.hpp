@@ -1,7 +1,6 @@
 #ifndef DISTRIBUTED_OCTTREE_HPP
 #define DISTRIBUTED_OCTTREE_HPP
 
-#ifdef RICH_MPI
 
 #include <vector>
 #include <assert.h>
@@ -688,6 +687,5 @@ std::vector<const typename DistributedOctTree<T, max_ranks_per_leaf>::Distribute
     return result;
 }
 
-#endif // RICH_MPI
 
 #endif // DISTRIBUTED_OCTTREE_HPP

@@ -9,7 +9,7 @@ A C++17 header-only library for spatial data structures.
 ## Features
 
 - **OctTree** — templated 3D octree with point insertion, lookup, removal, and sphere range queries
-- **DistributedOctTree** — MPI-distributed octree for rank-aware spatial queries (requires `RICH_MPI`)
+- **DistributedOctTree** — MPI-distributed octree for rank-aware spatial queries
 - **KDTree** — k-dimensional tree for multi-dimensional nearest-neighbor and range search
 - **BinaryTree / AVLTree** — generic binary search tree and self-balancing AVL variant
 - **RangeTree / GroupRangeTree** — d-dimensional range trees built on binary trees
@@ -39,13 +39,13 @@ A C++17 header-only library for spatial data structures.
 
 - **C++17** compiler
 - **CMake 3.14+** (optional; for project integration)
-- **MPI** (optional; required for `DistributedOctTree/` when `RICH_MPI` is defined)
+- **MPI** (optional; required when including `DistributedOctTree/`)
 - **Boost.Container** (optional; used by `DistributedOctTree/` for `flat_set` and `small_vector`)
 - **Vector Class Library** (optional; enabled via `USE_VCL_VECTORIZATION` for SIMD-accelerated geometry)
 
 ## External Dependencies
 
-When building with MPI support (`RICH_MPI`), the library depends on [cpp-MPI-utils](https://github.com/maormizrachi/cpp-MPI-utils) (`mpi_utils`) for serialization of bounding boxes, spheres, and ranked octree values. The consumer must add `mpi_utils` to the include path.
+When building with MPI support, the library depends on [cpp-MPI-utils](https://github.com/maormizrachi/cpp-MPI-utils) (`mpi_utils`) for serialization of bounding boxes, spheres, and ranked octree values. The consumer must add `mpi_utils` to the include path.
 
 ## Usage
 
@@ -85,12 +85,10 @@ int main() {
 For distributed usage with MPI:
 
 ```cpp
-#ifdef RICH_MPI
 #include <spatial_ds/DistributedOctTree/DistributedOctTree.hpp>
 
 DistributedOctTree<Point3> distTree(&serialTree, /*detailedNodeInfo=*/false, MPI_COMM_WORLD);
 auto ranks = distTree.getIntersectingRanks(Sphere<Point3>(center, radius));
-#endif
 ```
 
 ## Error Handling
