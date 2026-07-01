@@ -7,6 +7,7 @@
 #ifndef RANGETREE_HPP
 #define RANGETREE_HPP
 
+#include <cassert>
 #include <spatial_ds/BinaryTree.hpp>
 
 template<typename T>

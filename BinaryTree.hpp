@@ -8,11 +8,11 @@
 #ifndef _RICH_BST_HPP
 #define _RICH_BST_HPP
 
+#include <cassert>
 #include <algorithm>
 #include <functional>
 #include <vector>
 #include <utility>
-#include <assert.h>
 #include <spatial_ds/SpatialDsError.hpp>
 
 template<typename T>
