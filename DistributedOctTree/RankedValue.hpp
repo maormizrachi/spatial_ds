@@ -84,7 +84,6 @@ struct OctTreeRankedValue
 
         size_t dump(Serializer *serializer) const override
         {
-            // todo: full
             size_t bytes = 0;
             bytes += serializer->insert(this->value);
             return bytes;
@@ -92,7 +91,6 @@ struct OctTreeRankedValue
         
         size_t load(const Serializer *serializer, size_t byteOffset) override
         {
-            // todo: full
             size_t bytes = 0;
             bytes += serializer->extract(this->value, byteOffset);
             return bytes;

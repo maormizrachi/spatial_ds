@@ -6,14 +6,19 @@
     #include <vectorclass.h>
 #endif // USE_VCL_VECTORIZATION
 
+#ifdef SPATIAL_DS_WITH_MPI
     #include <mpi_utils/serialize/Serializer.hpp>
+#endif // SPATIAL_DS_WITH_MPI
+
 
 #define DIM 3
 #define TOLERANCE 1e-12
 
 template<typename T>
 class BoundingBox
-                    : public Serializable
+#ifdef SPATIAL_DS_WITH_MPI
+    : public Serializable
+#endif // SPATIAL_DS_WITH_MPI
 {
 template<typename U>
 friend class BoundingBox;
@@ -209,22 +214,6 @@ public:
     }
 
 
-    force_inline size_t dump(Serializer *serializer) const override
-    {
-        size_t bytes = 0;
-        bytes += serializer->insert(this->ll);
-        bytes += serializer->insert(this->ur);
-        return bytes;
-    }
-    
-    force_inline size_t load(const Serializer *serializer, size_t byteOffset) override
-    {
-        size_t bytesRead = 0;
-        bytesRead += serializer->extract(this->ll, byteOffset);
-        bytesRead += serializer->extract(this->ur, byteOffset + bytesRead);
-        this->recalculateFields();
-        return bytesRead;
-    }
 
 
     template<typename U>
@@ -232,6 +221,25 @@ public:
     {
         return ((this->ll == other.ll) and (this->ur == other.ur));
     }
+
+#ifdef SPATIAL_DS_WITH_MPI
+    size_t dump(Serializer *serializer) const override
+    {
+        size_t bytes = 0;
+        bytes += serializer->insert(this->ll);
+        bytes += serializer->insert(this->ur);
+        return bytes;
+    }
+
+    size_t load(const Serializer *serializer, size_t byteOffset) override
+    {
+        size_t bytes = 0;
+        bytes += serializer->extract(this->ll, byteOffset);
+        bytes += serializer->extract(this->ur, bytes + byteOffset);
+        this->recalculateFields();
+        return bytes;
+    }
+#endif // SPATIAL_DS_WITH_MPI
 };
 
 template<typename T>

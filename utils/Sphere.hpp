@@ -4,8 +4,10 @@
 #ifdef USE_VCL_VECTORIZATION
     #include <vectorclass.h>
 #endif // USE_VCL_VECTORIZATION
-
+#ifdef SPATIAL_DS_WITH_MPI
     #include <mpi_utils/serialize/Serializer.hpp>
+#endif // SPATIAL_DS_WITH_MPI
+
 
 #include <iostream>
 
@@ -15,7 +17,9 @@
 
 template<typename T>
 class Sphere
-                : public Serializable
+#ifdef SPATIAL_DS_WITH_MPI
+    : public Serializable
+#endif // SPATIAL_DS_WITH_MPI
 {
 public:
     T center;
@@ -39,21 +43,23 @@ public:
         return stream << "Sphere(" << sphere.center << ", " << sphere.radius << ")";
     }
 
-        force_inline size_t load(const Serializer *serializer, std::size_t byteOffset) override
-        {
-            size_t bytes = 0;
-            bytes += serializer->extract(this->center, byteOffset);
-            bytes += serializer->extract(this->radius, byteOffset + bytes);
-            return bytes;
-        }
+#ifdef SPATIAL_DS_WITH_MPI
+    size_t dump(Serializer *serializer) const override
+    {
+        size_t bytes = 0;
+        bytes += serializer->insert(this->center);
+        bytes += serializer->insert(this->radius);
+        return bytes;
+    }
 
-        force_inline size_t dump(Serializer *serializer) const override
-        {
-            size_t bytes = 0;
-            bytes += serializer->insert(this->center);
-            bytes += serializer->insert(this->radius);
-            return bytes;
-        }
+    size_t load(const Serializer *serializer, size_t byteOffset) override
+    {
+        size_t bytes = 0;
+        bytes += serializer->extract(this->center, byteOffset);
+        bytes += serializer->extract(this->radius, bytes + byteOffset);
+        return bytes;
+    }
+#endif // SPATIAL_DS_WITH_MPI
 };
 
 template<typename T>
