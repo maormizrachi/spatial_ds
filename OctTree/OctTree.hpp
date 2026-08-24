@@ -10,6 +10,7 @@
 #include <stack>
 #include <queue>
 #include <algorithm>
+#include <cstddef>
 #include <new>
 
 #ifdef DEBUG_MODE
@@ -52,27 +53,35 @@ public:
         class NodePool
         {
         public:
-            NodePool(): free_list_(nullptr){}
+            NodePool()
+                : free_list_(nullptr)
+            {}
 
             ~NodePool()
             {
                 for(size_t i = 0; i < this->blocks_.size(); ++i)
-                    ::operator delete(this->blocks_[i]);
+                {
+                    ::operator delete(this->blocks_[i], std::align_val_t(this->alignment_));
+                }
             }
 
-            void *allocate(size_t size)
+            void *Allocate(size_t size, size_t alignment)
             {
                 if(this->free_list_ == nullptr)
-                    this->addBlock(size);
+                {
+                    this->AddBlock(size, alignment);
+                }
                 FreeSlot *slot = this->free_list_;
                 this->free_list_ = slot->next;
                 return slot;
             }
 
-            void deallocate(void *ptr, size_t size)
+            void Deallocate(void *ptr, size_t size)
             {
                 if(ptr == nullptr)
+                {
                     return;
+                }
                 (void) size;
                 FreeSlot *slot = static_cast<FreeSlot*>(ptr);
                 slot->next = this->free_list_;
@@ -80,33 +89,40 @@ public:
             }
 
         private:
-            void addBlock(size_t slot_size)
+            // Nodes may be over-aligned (the bounding box holds AVX vectors), so the
+            // block and the slot stride must both honour the node alignment. Plain
+            // ::operator new only guarantees __STDCPP_DEFAULT_NEW_ALIGNMENT__, which
+            // makes the compiler's aligned vector stores fault.
+            void AddBlock(size_t slotSize, size_t alignment)
             {
-                const size_t block_nodes = 4096;
-                void *block = ::operator new(slot_size * block_nodes);
+                const size_t blockNodes = 4096;
+                const size_t stride = ((slotSize + alignment - 1) / alignment) * alignment;
+                void *block = ::operator new(stride * blockNodes, std::align_val_t(alignment));
                 try
                 {
                     this->blocks_.push_back(block);
                 }
                 catch(...)
                 {
-                    ::operator delete(block);
+                    ::operator delete(block, std::align_val_t(alignment));
                     throw;
                 }
+                this->alignment_ = alignment;
                 char *cursor = static_cast<char*>(block);
-                for(size_t i = 0; i < block_nodes; ++i)
+                for(size_t i = 0; i < blockNodes; ++i)
                 {
-                    FreeSlot *slot = reinterpret_cast<FreeSlot*>(cursor + i * slot_size);
+                    FreeSlot *slot = reinterpret_cast<FreeSlot*>(cursor + i * stride);
                     slot->next = this->free_list_;
                     this->free_list_ = slot;
                 }
             }
 
             FreeSlot *free_list_;
+            size_t alignment_ = alignof(std::max_align_t);
             std::vector<void*> blocks_;
         };
 
-        static NodePool &nodePool()
+        static NodePool &GetNodePool()
         {
             static NodePool pool;
             return pool;
@@ -116,17 +132,33 @@ public:
         static void *operator new(size_t size)
         {
             static_assert(sizeof(OctTreeNode) >= sizeof(FreeSlot), "OctTreeNode must fit a free-list pointer");
-            return nodePool().allocate(size);
+            return GetNodePool().Allocate(size, alignof(OctTreeNode));
+        }
+
+        static void *operator new(size_t size, std::align_val_t alignment)
+        {
+            static_assert(sizeof(OctTreeNode) >= sizeof(FreeSlot), "OctTreeNode must fit a free-list pointer");
+            return GetNodePool().Allocate(size, static_cast<size_t>(alignment));
         }
 
         static void operator delete(void *ptr) noexcept
         {
-            nodePool().deallocate(ptr, sizeof(OctTreeNode));
+            GetNodePool().Deallocate(ptr, sizeof(OctTreeNode));
         }
 
         static void operator delete(void *ptr, size_t size) noexcept
         {
-            nodePool().deallocate(ptr, size);
+            GetNodePool().Deallocate(ptr, size);
+        }
+
+        static void operator delete(void *ptr, std::align_val_t) noexcept
+        {
+            GetNodePool().Deallocate(ptr, sizeof(OctTreeNode));
+        }
+
+        static void operator delete(void *ptr, size_t size, std::align_val_t) noexcept
+        {
+            GetNodePool().Deallocate(ptr, size);
         }
 
         inline OctTreeNode(const T &ll, const T &ur): isLeaf(false), value((ll + ur)/2), boundingBox(BoundingBox<Raw_type>(ll, ur)), parent(nullptr), height(0), depth(0)
