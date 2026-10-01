@@ -2,6 +2,10 @@
 #define DISTRIBUTED_OCTTREE_HPP
 
 #include <cassert>
+#include <cstdlib>
+#include <limits>
+#include <stdexcept>
+#include <algorithm>
 
 #include <vector>
 #include <utility>
@@ -98,6 +102,13 @@ private:
     size_t treeSize;
 
     void buildTreeHelper(DistributedOctTreeNode *newNode, const typename OctTree<T>::OctTreeNode *node, std::vector<direction_t> &directionsInMyTree);
+
+    // Level-synchronous build without detailed node info: the same tree as buildTreeHelper, with one MPI_Allgather
+    // per tree level instead of one per internal node.
+    void buildTreeBatched(const OctTree<T> *tree);
+
+    // Structure and owners of two trees agree node by node.
+    static bool sameTree(const DistributedOctTreeNode *a, const DistributedOctTreeNode *b);
 
     void buildTree(const OctTree<T> *tree);
 
@@ -292,9 +303,135 @@ void DistributedOctTree<T, max_ranks_per_leaf>::buildTree(const OctTree<T> *tree
 
     RankedValue ll, ur;
 
+    // RICH_DISTRIBUTED_OCTTREE_BATCHED: 1 (default) builds level by level, 0 recursively (one collective per internal
+    // node), 2 builds both and fails unless they agree.  Detailed node info always builds recursively (it broadcasts
+    // per leaf).  Agreed on this->comm at every construction, which every rank of the communicator makes together.
+    int mode = 1;
+    if(!this->detailedNodeInfo)
+    {
+        char const* const value = std::getenv("RICH_DISTRIBUTED_OCTTREE_BATCHED");
+        if(value != nullptr && value[0] != '\0')
+            mode = (value[0] >= '0' && value[0] <= '2' && value[1] == '\0') ? value[0] - '0' : -1;
+        int extrema[2] = {mode, -mode};
+        MPI_Allreduce(MPI_IN_PLACE, extrema, 2, MPI_INT, MPI_MAX, this->comm);
+        if(extrema[0] != -extrema[1] || extrema[0] < 0)
+            throw std::invalid_argument("RICH_DISTRIBUTED_OCTTREE_BATCHED must be 0, 1 or 2 on every rank");
+        mode = extrema[0];
+    }
+    else
+        mode = 0;
+
     this->octTree = new OctTree<RankedValue>(tree->getLL(), tree->getUR());
     this->treeSize = 0;
-    this->buildTreeHelper(this->octTree->getRoot(), tree->getRoot(), directions);
+    if(mode == 0)
+    {
+        this->buildTreeHelper(this->octTree->getRoot(), tree->getRoot(), directions);
+        return;
+    }
+    this->buildTreeBatched(tree);
+    if(mode == 2)
+    {
+        OctTree<RankedValue> *const batched = this->octTree;
+        size_t const batchedSize = this->treeSize;
+        this->octTree = new OctTree<RankedValue>(tree->getLL(), tree->getUR());
+        this->treeSize = 0;
+        this->buildTreeHelper(this->octTree->getRoot(), tree->getRoot(), directions);
+        bool const same = batchedSize == this->treeSize && sameTree(batched->getRoot(), this->octTree->getRoot());
+        delete this->octTree;
+        this->octTree = batched;
+        if(!same)
+            throw std::logic_error("Batched distributed octree differs from the recursive build");
+    }
+}
+
+template<typename T, int max_ranks_per_leaf>
+bool DistributedOctTree<T, max_ranks_per_leaf>::sameTree(const DistributedOctTreeNode *a, const DistributedOctTreeNode *b)
+{
+    if(a == nullptr || b == nullptr)
+        return a == b;
+    if(a->isLeaf != b->isLeaf || a->value.owners.size() != b->value.owners.size() ||
+       !std::equal(a->value.owners.cbegin(), a->value.owners.cend(), b->value.owners.cbegin()))
+        return false;
+    for(int i = 0; i < CHILDREN; i++)
+        if(!sameTree(a->children[i], b->children[i]))
+            return false;
+    return true;
+}
+
+template<typename T, int max_ranks_per_leaf>
+void DistributedOctTree<T, max_ranks_per_leaf>::buildTreeBatched(const OctTree<T> *tree)
+{
+    // One entry per node still to split, in the same order on every rank (the order the decisions produce): the
+    // node in the distributed tree and this rank's matching local node, or nullptr.  Each node is decided exactly
+    // as in buildTreeHelper, from the child bits every rank reports for it.
+    using LocalNode = typename OctTree<T>::OctTreeNode;
+    std::vector<std::pair<DistributedOctTreeNode*, const LocalNode*>> open{{this->octTree->getRoot(), tree->getRoot()}};
+    std::vector<std::pair<DistributedOctTreeNode*, const LocalNode*>> next;
+    std::vector<unsigned char> mine, gathered;
+    std::vector<int> ranks_containing_child;
+    while(!open.empty())
+    {
+        size_t const count = open.size();
+        mine.assign(count, 0);
+        for(size_t k = 0; k < count; k++)
+        {
+            DistributedOctTreeNode *const newNode = open[k].first;
+            const LocalNode *const node = open[k].second;
+            if(node == nullptr)
+                continue;
+            unsigned char valueToSend = 0;
+            for(int i = 0; i < CHILDREN; i++)
+            {
+                bool bit = (node->children[i] != nullptr || (node->isLeaf and newNode->getChildNumberContaining(node->value) == i));
+                valueToSend |= (bit << i);
+            }
+            mine[k] = valueToSend;
+        }
+        if(count > static_cast<size_t>(std::numeric_limits<int>::max()))
+            throw std::overflow_error("Distributed octree level too wide for one MPI_Allgather");
+        gathered.resize(count * static_cast<size_t>(this->size));
+        MPI_Allgather(mine.data(), static_cast<int>(count), MPI_UNSIGNED_CHAR, gathered.data(),
+                      static_cast<int>(count), MPI_UNSIGNED_CHAR, this->comm);
+        next.clear();
+        for(size_t k = 0; k < count; k++)
+        {
+            DistributedOctTreeNode *const newNode = open[k].first;
+            const LocalNode *const node = open[k].second;
+            for(int i = 0; i < CHILDREN; i++)
+            {
+                ranks_containing_child.clear();
+                for(int _rank = 0; _rank < this->size; _rank++)
+                    if(((gathered[static_cast<size_t>(_rank) * count + k] >> i) & 0x1) == 1)
+                        ranks_containing_child.push_back(_rank);
+                this->treeSize++;
+                if(ranks_containing_child.empty())
+                {
+                    newNode->children[i] = nullptr;
+                    continue;
+                }
+                newNode->createChild(i);
+                if(ranks_containing_child.size() > static_cast<size_t>(max_ranks_per_leaf))
+                {
+                    // Several holders: split further (the local node may be null, or a leaf outside this child).
+                    const LocalNode *nextNode = nullptr;
+                    if(node != nullptr)
+                        nextNode = node->isLeaf ? (newNode->children[i]->boundingBox.contains(node->value) ? node : nullptr)
+                            : node->children[i];
+                    next.emplace_back(newNode->children[i], nextNode);
+                    newNode->children[i]->value.owners.resize(0);
+                    newNode->children[i]->isLeaf = false;
+                }
+                else
+                {
+                    newNode->children[i]->value.owners.resize(ranks_containing_child.size());
+                    std::copy(ranks_containing_child.cbegin(), ranks_containing_child.cend(),
+                              newNode->children[i]->value.owners.begin());
+                    newNode->children[i]->isLeaf = true;
+                }
+            }
+        }
+        open.swap(next);
+    }
 }
 
 template<typename T, int max_ranks_per_leaf>
