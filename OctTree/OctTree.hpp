@@ -258,7 +258,13 @@ protected:
     T ll, ur;
     size_t treeSize;
     size_t nodesNumber;
-    mutable std::vector<const OctTreeNode*> nodes_stack;
+    // The stack of a search, one per thread, so a tree can be searched from several threads at once
+    static std::vector<const OctTreeNode*> &SearchStack()
+    {
+        thread_local std::vector<const OctTreeNode*> stack;
+        stack.clear();
+        return stack;
+    }
 
 public:
     explicit OctTree(const T &ll, const T &ur): root(nullptr), treeSize(0), nodesNumber(0){this->setBounds(ll, ur);};
@@ -803,6 +809,7 @@ template<typename T>
 template<typename U, typename FilterFunction>
 std::vector<T> OctTree<T>::range(const Sphere<U> &sphere, size_t N, const FilterFunction &filter) const
 {
+    std::vector<const OctTreeNode*> &nodes_stack = SearchStack();
     std::vector<T> result;
     size_t resultSize = 0;
     const OctTreeNode *root = this->getRoot();
@@ -810,12 +817,12 @@ std::vector<T> OctTree<T>::range(const Sphere<U> &sphere, size_t N, const Filter
     {
         return result;
     }
-    this->nodes_stack.push_back(root);
+    nodes_stack.push_back(root);
 
-    while((not this->nodes_stack.empty()) and (resultSize < N))
+    while((not nodes_stack.empty()) and (resultSize < N))
     {
-        const OctTreeNode *node = this->nodes_stack.back();
-        this->nodes_stack.pop_back();
+        const OctTreeNode *node = nodes_stack.back();
+        nodes_stack.pop_back();
 
         // DO NOT CHANGE THIS LINE TO "if `node->value` is in `sphere`"
         // that is because a leaf does not necessarily have to be a point (it can be a box, as in `DistributedOctTree`)
@@ -834,13 +841,13 @@ std::vector<T> OctTree<T>::range(const Sphere<U> &sphere, size_t N, const Filter
                 const OctTreeNode *child = node->children[i];
                 if(child != nullptr && SphereBoxIntersection(child->boundingBox, sphere))
                 {
-                    this->nodes_stack.push_back(child);
+                    nodes_stack.push_back(child);
                 }
             }
         }
     }
 
-    this->nodes_stack.clear();
+    nodes_stack.clear();
 
     return result;
 }
@@ -849,6 +856,7 @@ template<typename T>
 template<typename U, typename FilterFunction>
 std::pair<T, typename T::coord_type> OctTree<T>::getClosestPointInSphere(const Sphere<U> &sphere, const T &point, const FilterFunction &filter) const
 {
+    std::vector<const OctTreeNode*> &nodes_stack = SearchStack();
     T closestPoint;
     typename T::coord_type closestDistance = std::numeric_limits<typename T::coord_type>::max();
 
@@ -857,12 +865,12 @@ std::pair<T, typename T::coord_type> OctTree<T>::getClosestPointInSphere(const S
     {
         return {closestPoint, closestDistance};
     }
-    this->nodes_stack.push_back(root);
+    nodes_stack.push_back(root);
 
-    while(not this->nodes_stack.empty())
+    while(not nodes_stack.empty())
     {
-        const OctTreeNode *node = this->nodes_stack.back();
-        this->nodes_stack.pop_back();
+        const OctTreeNode *node = nodes_stack.back();
+        nodes_stack.pop_back();
 
         if(node->isLeaf)
         {
@@ -883,7 +891,7 @@ std::pair<T, typename T::coord_type> OctTree<T>::getClosestPointInSphere(const S
                 typename T::coord_type dist = child->boundingBox.distanceSquared(point);
                 if(dist < closestDistance && SphereBoxIntersection(child->boundingBox, sphere))
                 {
-                    this->nodes_stack.push_back(child);
+                    nodes_stack.push_back(child);
                 }
             }
         }
